@@ -35,6 +35,8 @@ PC_TEMPLATE := rptadv_ffmpeg_adapter.pc.in
 PC_FILE := build/rptadv_ffmpeg_adapter.pc
 C_SMOKE_SOURCE := tests/descriptor_smoke.c
 C_SMOKE_BINARY := build/descriptor-smoke
+C_FAULT_SOURCE := tests/bridge_faults.c
+C_FAULT_BINARY := build/bridge-faults
 QUALITY_BASE_IMAGE ?= ghcr.io/cpeter1207/rpt-advanced-quality-debian13:latest
 QUALITY_IMAGE ?= $(PACKAGE)-quality:local
 QUALITY_LAUNCHER := tools/run-in-quality-container.sh
@@ -91,7 +93,7 @@ static-analysis:
 	$(CARGO_CLIPPY) --all-targets --all-features -- -D warnings
 	$(CPPCHECK) --force --enable=warning,style,performance,portability \
 		--check-level=exhaustive --error-exitcode=1 --std=c11 -Isrc \
-		$(C_BRIDGE_SOURCES) $(C_SMOKE_SOURCE)
+		$(C_BRIDGE_SOURCES) $(C_SMOKE_SOURCE) $(C_FAULT_SOURCE)
 
 $(RUST_DOXYGEN_INPUT): $(RUST_DOXYGEN_GENERATOR) $(RUST_PRODUCTION_SOURCES) | build
 	$(PYTHON) $(RUST_DOXYGEN_GENERATOR) $@ $(RUST_PRODUCTION_SOURCES)
@@ -104,6 +106,8 @@ test: all
 	CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" $(CARGO) test --all-targets --locked
 	$(MAKE) $(C_SMOKE_BINARY)
 	./$(C_SMOKE_BINARY)
+	$(MAKE) $(C_FAULT_BINARY)
+	./$(C_FAULT_BINARY)
 
 coverage:
 	rm -rf $(COVERAGE_DIR) $(COVERAGE_TARGET_DIR)
@@ -111,8 +115,12 @@ coverage:
 	CC="$(CURDIR)/tools/coverage-cc.sh" RUSTFLAGS="-C link-arg=-lgcov" \
 		RUSTUP_TOOLCHAIN=$(COVERAGE_TOOLCHAIN) CARGO_LLVM_COV_TARGET_DIR=$(abspath $(COVERAGE_TARGET_DIR)) \
 		$(CARGO_LLVM_COV) --all-targets --locked --branch --json --output-path $(COVERAGE_JSON)
+	$(CC) -std=c11 -Wall -Wextra -Werror --coverage \
+		$$(pkg-config --cflags libavfilter libavutil) tests/bridge_faults.c \
+		$$(pkg-config --libs libavfilter libavutil) -o $(COVERAGE_DIR)/bridge-faults
+	./$(COVERAGE_DIR)/bridge-faults
 	gcovr --root . --filter 'src/ffmpeg_bridge.c' --json-summary $(COVERAGE_DIR)/c-summary.json \
-		--fail-under-line 100 --fail-under-branch 100 $(COVERAGE_TARGET_DIR)
+		--fail-under-line 100 --fail-under-branch 100 $(COVERAGE_TARGET_DIR) $(COVERAGE_DIR)
 	$(PYTHON) -c 'import json, os, sys; report=json.load(open(sys.argv[1], encoding="utf-8")); root=os.path.realpath(sys.argv[2]); test=os.path.realpath(sys.argv[3]); files={}; [files.setdefault(path, entry["summary"]) for datum in report.get("data", []) for entry in datum.get("files", []) for path in (os.path.realpath(entry["filename"]),) if os.path.commonpath((root,path)) == root and path != test and "{}tests{}".format(os.path.sep,os.path.sep) not in path]; failures=[(path,metric,summary.get(metric,{})) for path,summary in sorted(files.items()) for metric in ("lines","branches") if not isinstance(summary.get(metric),dict) or summary[metric].get("covered") != summary[metric].get("count")]; print("verified production coverage for {} source files".format(len(files))); [print("{}: {} {}/{}".format(path,metric,values.get("covered","missing"),values.get("count","missing")),file=sys.stderr) for path,metric,values in failures]; raise SystemExit(1 if not files or failures else 0)' $(COVERAGE_JSON) $(COVERAGE_PRODUCTION_ROOT) $(COVERAGE_TEST_MODULE)
 quality-image:
 	docker image pull $(QUALITY_BASE_IMAGE)
@@ -125,6 +133,11 @@ container-test: quality-image
 $(C_SMOKE_BINARY): $(C_SMOKE_SOURCE) $(HEADER) $(LIBRARY_LINK) | build
 	$(CC) -std=c11 -Wall -Wextra -Werror -Iinclude $< -Lbuild \
 		-l$(CRATE) -Wl,-rpath,'$$ORIGIN' -o $@
+
+$(C_FAULT_BINARY): $(C_FAULT_SOURCE) $(C_BRIDGE_SOURCES) | build
+	$(CC) -std=c11 -Wall -Wextra -Werror \
+		$$(pkg-config --cflags libavfilter libavutil) $< \
+		$$(pkg-config --libs libavfilter libavutil) -o $@
 
 install: all $(PC_FILE)
 	install -d $(DESTDIR)$(LIBDIR) \

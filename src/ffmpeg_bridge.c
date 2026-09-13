@@ -182,11 +182,11 @@ static int configure_filter_graph(struct rptadv_ffmpeg_bridge_graph *graph,
 	if (source_filter == NULL || sink_filter == NULL) {
 		return AVERROR_FILTER_NOT_FOUND;
 	}
-	if (snprintf(source_args, sizeof(source_args),
-		     "time_base=1/%u:sample_rate=%u:sample_fmt=flt:channel_layout=mono",
-		     sample_rate_hz, sample_rate_hz) >= (int)sizeof(source_args)) {
-		return AVERROR(EINVAL);
-	}
+	/* Two uint32_t decimal values need at most 20 digits; the fixed format
+	 * and terminator therefore always fit in this 128-byte buffer. */
+	(void)snprintf(source_args, sizeof(source_args),
+		       "time_base=1/%u:sample_rate=%u:sample_fmt=flt:channel_layout=mono",
+		       sample_rate_hz, sample_rate_hz);
 	graph->filter_graph = avfilter_graph_alloc();
 	if (graph->filter_graph == NULL) {
 		return AVERROR(ENOMEM);

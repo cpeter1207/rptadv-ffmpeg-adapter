@@ -1,14 +1,14 @@
 # rptadv-ffmpeg-adapter
 
-`rptadv-ffmpeg-adapter` is the future versioned dynamic FFmpeg graph boundary
+`rptadv-ffmpeg-adapter` is the versioned dynamic FFmpeg graph boundary
 for `rpt_advanced` and USBRadioPlus. It deliberately owns the unstable FFmpeg
 C ABI behind a small, versioned descriptor. Consumers exchange mono,
 normalized F32 PCM and never include FFmpeg headers or link FFmpeg directly.
 
 ABI v1 creates one fixed-rate graph from a caller-supplied FFmpeg filter
 description and processes bounded, sample-preserving PCM blocks. It is an
-isolated migration scaffold: USBRadioPlus does not use it yet and the adapter
-does not add a second DSP implementation. FFmpeg remains a dynamic runtime
+adapter used during the USBRadioPlus native radio-engine migration.
+FFmpeg remains a dynamic runtime
 dependency; this project neither vendors nor static-links it.
 
 The original ABI-v1 streaming entry reports the graph output currently

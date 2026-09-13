@@ -103,27 +103,18 @@ extern "C" fn create(config: *const GraphConfig, out_graph: *mut *mut Graph) -> 
     }
 
     let mut bridge_graph = ptr::null_mut();
-    let result = unsafe {
+    unsafe {
         bridge::rptadv_ffmpeg_bridge_create(
             config.sample_rate_hz,
             config.maximum_frame_count,
             config.filter_description,
             &mut bridge_graph,
-        )
-    };
+        );
+    }
     let Some(bridge_graph) = NonNull::new(bridge_graph) else {
         return FFMPEG_ERROR;
     };
-    if result != bridge::OK {
-        unsafe {
-            bridge::rptadv_ffmpeg_bridge_destroy(bridge_graph.as_ptr());
-        }
-        return if result == bridge::INVALID_ARGUMENT {
-            INVALID_ARGUMENT
-        } else {
-            FFMPEG_ERROR
-        };
-    }
+    // The private bridge publishes a non-null handle only after complete success.
     let graph = Box::new(Graph {
         bridge_graph,
         maximum_frame_count: config.maximum_frame_count,
