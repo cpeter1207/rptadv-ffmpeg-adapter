@@ -1,0 +1,13 @@
+/build/
+/.work/
+/target/
+__pycache__/
+*.pyc
+.ruff_cache/
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/librptadv-ffmpeg-adapter1/
+/debian/librptadv-ffmpeg-adapter-dev/
+/debian/tmp/
+/debian/*.substvars
