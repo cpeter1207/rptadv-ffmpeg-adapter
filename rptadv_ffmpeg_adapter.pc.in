@@ -1,0 +1,12 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=@LIBDIR@
+includedir=${prefix}/include
+
+Name: rptadv_ffmpeg_adapter
+Description: FFmpeg graph adapter for rpt_advanced
+Version: @VERSION@
+URL: https://github.com/cpeter1207/rptadv-ffmpeg-adapter
+Libs: -L${libdir} -lrptadv_ffmpeg_adapter
+Cflags: -I${includedir}
+

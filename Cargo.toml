@@ -1,0 +1,21 @@
+[package]
+name = "rptadv-ffmpeg-adapter"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-2.0-only"
+description = "FFmpeg graph adapter for rpt_advanced"
+repository = "https://github.com/cpeter1207/rptadv-ffmpeg-adapter"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "rptadv_ffmpeg_adapter"
+crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+debug = 1
+lto = "thin"
+panic = "abort"
+
