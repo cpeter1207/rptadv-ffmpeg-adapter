@@ -274,8 +274,9 @@ int rptadv_ffmpeg_bridge_create(uint32_t sample_rate_hz,
  */
 static int output_frame_is_normalized_mono_f32(const AVFrame *frame)
 {
-	return frame->format == AV_SAMPLE_FMT_FLT && frame->ch_layout.nb_channels == 1 &&
-	       frame->nb_samples >= 0;
+	/* Packed and planar F32 have the same single-plane layout for mono PCM. */
+	return (frame->format == AV_SAMPLE_FMT_FLT || frame->format == AV_SAMPLE_FMT_FLTP) &&
+	       frame->ch_layout.nb_channels == 1 && frame->nb_samples >= 0;
 }
 
 /**

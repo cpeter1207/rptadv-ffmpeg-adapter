@@ -55,6 +55,28 @@ static void test_process_block_fifo(const struct rptadv_ffmpeg_adapter_descripto
 	descriptor->destroy(graph);
 }
 
+/** @brief Verify stateful filters retain the adapter's packed-F32 contract. */
+static void test_process_block_stateful_filter(
+	const struct rptadv_ffmpeg_adapter_descriptor *descriptor)
+{
+	const struct rptadv_ffmpeg_graph_config config = {
+		.struct_size = sizeof(config),
+		.abi_version = RPTADV_FFMPEG_ADAPTER_ABI_VERSION,
+		.sample_rate_hz = 48000,
+		.maximum_frame_count = 8,
+		.filter_description = "bandreject=f=67:t=h:w=10:r=f32",
+	};
+	const float input[8] = { -1.0F, -0.5F, -0.25F, 0.0F,
+				 0.25F, 0.5F, 0.75F, 1.0F };
+	float output[8] = { 0.0F };
+	struct rptadv_ffmpeg_graph *graph = NULL;
+
+	assert(descriptor->create(&config, &graph) == RPTADV_FFMPEG_ADAPTER_OK);
+	assert(descriptor->process_block(graph, input, 8, output) ==
+	       RPTADV_FFMPEG_ADAPTER_OK);
+	descriptor->destroy(graph);
+}
+
 /** @brief Exercise descriptor discovery, graph creation, processing, and release. */
 int main(void)
 {
@@ -113,5 +135,6 @@ int main(void)
 	       RPTADV_FFMPEG_ADAPTER_INVALID_ARGUMENT);
 	descriptor->destroy(block_graph);
 	test_process_block_fifo(descriptor);
+	test_process_block_stateful_filter(descriptor);
 	return 0;
 }
