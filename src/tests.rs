@@ -253,7 +253,7 @@ fn block_processing_preserves_delayed_samples_and_rejects_bad_arguments() {
 }
 
 #[test]
-fn unexpected_ffmpeg_output_format_is_reported_without_partial_progress() {
+fn explicit_non_f32_graph_output_is_normalized_at_the_adapter_boundary() {
     let graph = TestGraph::new(c"aformat=sample_fmts=s16");
     let input = [0.5_f32; 8];
     let mut output = [0.0_f32; 8];
@@ -269,12 +269,13 @@ fn unexpected_ffmpeg_output_format_is_reported_without_partial_progress() {
             &mut used,
             &mut generated
         ),
-        super::FFMPEG_ERROR
+        super::OK
     );
-    assert_eq!((used, generated), (0, 0));
+    assert_eq!((used, generated), (8, 8));
+    assert_eq!(output, input);
     let block = TestGraph::new(c"aformat=sample_fmts=s16");
     assert_eq!(
         super::process_block(block.0, input.as_ptr(), 8, output.as_mut_ptr()),
-        super::FFMPEG_ERROR
+        super::OK
     );
 }

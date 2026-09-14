@@ -77,6 +77,28 @@ static void test_process_block_stateful_filter(
 	descriptor->destroy(graph);
 }
 
+/** @brief Verify double-producing filters are normalized at the F32 boundary. */
+static void test_process_block_normalizes_filter_output(
+	const struct rptadv_ffmpeg_adapter_descriptor *descriptor)
+{
+	const struct rptadv_ffmpeg_graph_config config = {
+		.struct_size = sizeof(config),
+		.abi_version = RPTADV_FFMPEG_ADAPTER_ABI_VERSION,
+		.sample_rate_hz = 48000,
+		.maximum_frame_count = 960,
+		.filter_description =
+			"[in]alimiter=limit=0.794328:attack=5:release=100:level=0:latency=0[out]",
+	};
+	float input[960] = { 0.0F };
+	float output[960] = { 0.0F };
+	struct rptadv_ffmpeg_graph *graph = NULL;
+
+	assert(descriptor->create(&config, &graph) == RPTADV_FFMPEG_ADAPTER_OK);
+	assert(descriptor->process_block(graph, input, 960, output) ==
+	       RPTADV_FFMPEG_ADAPTER_OK);
+	descriptor->destroy(graph);
+}
+
 /** @brief Exercise descriptor discovery, graph creation, processing, and release. */
 int main(void)
 {
@@ -136,5 +158,6 @@ int main(void)
 	descriptor->destroy(block_graph);
 	test_process_block_fifo(descriptor);
 	test_process_block_stateful_filter(descriptor);
+	test_process_block_normalizes_filter_output(descriptor);
 	return 0;
 }

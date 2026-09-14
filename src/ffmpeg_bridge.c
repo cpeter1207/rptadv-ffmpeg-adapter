@@ -21,6 +21,7 @@
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
+#include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 
 /** Number of source frames reserved for exact-block graph processing. */
@@ -170,6 +171,8 @@ static int configure_filter_graph(struct rptadv_ffmpeg_bridge_graph *graph,
 					  uint32_t sample_rate_hz,
 					  const char *filter_description)
 {
+	const enum AVSampleFormat output_formats[] = { AV_SAMPLE_FMT_FLT,
+						       AV_SAMPLE_FMT_NONE };
 	AVFilterInOut *inputs = NULL;
 	AVFilterInOut *outputs = NULL;
 	const AVFilter *source_filter;
@@ -198,6 +201,11 @@ static int configure_filter_graph(struct rptadv_ffmpeg_bridge_graph *graph,
 	}
 	result = avfilter_graph_create_filter(&graph->sink, sink_filter, "out", NULL,
 					     NULL, graph->filter_graph);
+	if (result < 0) {
+		return result;
+	}
+	result = av_opt_set_int_list(graph->sink, "sample_fmts", output_formats,
+				     AV_SAMPLE_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
 	if (result < 0) {
 		return result;
 	}
