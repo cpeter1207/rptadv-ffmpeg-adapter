@@ -279,3 +279,30 @@ fn explicit_non_f32_graph_output_is_normalized_at_the_adapter_boundary() {
         super::OK
     );
 }
+
+#[test]
+fn non_mono_graph_output_propagates_bridge_errors() {
+    let graph = TestGraph::new(c"aformat=channel_layouts=stereo");
+    let input = [0.5_f32; 8];
+    let mut output = [0.0_f32; 8];
+    let mut used = 99;
+    let mut generated = 99;
+    assert_eq!(
+        super::process(
+            graph.0,
+            input.as_ptr(),
+            8,
+            output.as_mut_ptr(),
+            8,
+            &mut used,
+            &mut generated
+        ),
+        super::FFMPEG_ERROR
+    );
+    assert_eq!((used, generated), (0, 0));
+    let block = TestGraph::new(c"aformat=channel_layouts=stereo");
+    assert_eq!(
+        super::process_block(block.0, input.as_ptr(), 8, output.as_mut_ptr()),
+        super::FFMPEG_ERROR
+    );
+}

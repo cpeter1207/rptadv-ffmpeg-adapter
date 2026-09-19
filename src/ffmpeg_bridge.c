@@ -171,8 +171,7 @@ static int configure_filter_graph(struct rptadv_ffmpeg_bridge_graph *graph,
 					  uint32_t sample_rate_hz,
 					  const char *filter_description)
 {
-	const enum AVSampleFormat output_formats[] = { AV_SAMPLE_FMT_FLT,
-						       AV_SAMPLE_FMT_NONE };
+	const enum AVSampleFormat output_format = AV_SAMPLE_FMT_FLT;
 	AVFilterInOut *inputs = NULL;
 	AVFilterInOut *outputs = NULL;
 	const AVFilter *source_filter;
@@ -204,8 +203,10 @@ static int configure_filter_graph(struct rptadv_ffmpeg_bridge_graph *graph,
 	if (result < 0) {
 		return result;
 	}
-	result = av_opt_set_int_list(graph->sink, "sample_fmts", output_formats,
-				     AV_SAMPLE_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+	/* The fixed one-format list fits without the generic list-size guard. */
+	result = av_opt_set_bin(graph->sink, "sample_fmts",
+				(const uint8_t *)&output_format, sizeof(output_format),
+				AV_OPT_SEARCH_CHILDREN);
 	if (result < 0) {
 		return result;
 	}
