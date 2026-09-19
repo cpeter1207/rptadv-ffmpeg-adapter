@@ -18,6 +18,7 @@
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
+#include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 
 static void check(int condition, int line)
@@ -33,7 +34,7 @@ static void check(int condition, int line)
 enum fault_point {
     NONE, CALLOC, FRAME_ALLOC, FRAME_BUFFER, FILTER_LOOKUP, GRAPH_ALLOC,
     FILTER_CREATE, INOUT_ALLOC, STRING_DUP, GRAPH_PARSE, GRAPH_CONFIG,
-    FIFO_ALLOC, FRAME_WRITABLE, SOURCE_ADD, FIFO_WRITE, FIFO_READ
+    FIFO_ALLOC, FRAME_WRITABLE, SOURCE_ADD, FIFO_WRITE, FIFO_READ, OPT_SET
 };
 static enum fault_point selected_fault;
 static unsigned int failure_call, observed_calls;
@@ -63,7 +64,7 @@ static int scripted_sink(AVFilterContext *sink, AVFrame *frame)
     if (sink_emitted++)
         return AVERROR(EAGAIN);
     av_frame_unref(frame);
-    frame->format = AV_SAMPLE_FMT_FLT;
+    frame->format = sink_mode == 8 ? AV_SAMPLE_FMT_FLTP : AV_SAMPLE_FMT_FLT;
     av_channel_layout_default(&frame->ch_layout, 1);
     frame->nb_samples = 8;
     CHECK(av_frame_get_buffer(frame, 0) == 0);
@@ -85,6 +86,7 @@ static int scripted_sink(AVFilterContext *sink, AVFrame *frame)
 #define avfilter_get_by_name(...) (fail(FILTER_LOOKUP) ? NULL : avfilter_get_by_name(__VA_ARGS__))
 #define avfilter_graph_alloc(...) (fail(GRAPH_ALLOC) ? NULL : avfilter_graph_alloc(__VA_ARGS__))
 #define avfilter_graph_create_filter(...) (fail(FILTER_CREATE) ? AVERROR(EIO) : avfilter_graph_create_filter(__VA_ARGS__))
+#define av_opt_set_bin(...) (fail(OPT_SET) ? AVERROR(EIO) : av_opt_set_bin(__VA_ARGS__))
 #define avfilter_inout_alloc(...) (fail(INOUT_ALLOC) ? NULL : avfilter_inout_alloc(__VA_ARGS__))
 #define av_strdup(...) (fail(STRING_DUP) ? NULL : av_strdup(__VA_ARGS__))
 #define avfilter_graph_parse_ptr(...) (fail(GRAPH_PARSE) ? AVERROR(EIO) : avfilter_graph_parse_ptr(__VA_ARGS__))
@@ -102,6 +104,7 @@ static int scripted_sink(AVFilterContext *sink, AVFrame *frame)
 #undef avfilter_get_by_name
 #undef avfilter_graph_alloc
 #undef avfilter_graph_create_filter
+#undef av_opt_set_bin
 #undef avfilter_inout_alloc
 #undef av_strdup
 #undef avfilter_graph_parse_ptr
@@ -131,7 +134,7 @@ static void creation_failures(void)
         { CALLOC, 1 }, { FRAME_ALLOC, 10 }, { FRAME_BUFFER, 9 },
         { FILTER_LOOKUP, 2 }, { GRAPH_ALLOC, 1 }, { FILTER_CREATE, 2 },
         { INOUT_ALLOC, 2 }, { STRING_DUP, 2 }, { GRAPH_PARSE, 1 },
-        { GRAPH_CONFIG, 1 }, { FIFO_ALLOC, 1 }
+        { GRAPH_CONFIG, 1 }, { FIFO_ALLOC, 1 }, { OPT_SET, 1 }
     };
     for (size_t i = 0; i < sizeof(faults) / sizeof(faults[0]); ++i) {
         for (unsigned int call = 1; call <= faults[i].calls; ++call) {
@@ -168,10 +171,10 @@ static void streaming_failures(void)
     graph->processing_contract = RPTADV_FFMPEG_BRIDGE_PROCESSING_BLOCK;
     CHECK(rptadv_ffmpeg_bridge_process(graph, input, 8, output, 8, &used, &generated) == -1);
     graph->processing_contract = RPTADV_FFMPEG_BRIDGE_PROCESSING_UNSET;
-    for (int mode = 1; mode <= 7; ++mode) {
+    for (int mode = 1; mode <= 8; ++mode) {
         sink_mode = mode;
         sink_emitted = 0;
-        int expected = mode == 1 || mode == 7 ? 0 : -2;
+        int expected = mode == 1 || mode >= 7 ? 0 : -2;
         CHECK(rptadv_ffmpeg_bridge_process(graph, NULL, 0, output, 8, &used, &generated) == expected);
     }
     sink_mode = 0;
@@ -212,11 +215,11 @@ static void block_failures(void)
     CHECK(rptadv_ffmpeg_bridge_process_block(graph, input, 8, output) == -2);
     select_fault(NONE, 0);
     rptadv_ffmpeg_bridge_destroy(graph);
-    for (int mode = 1; mode <= 7; ++mode) {
+    for (int mode = 1; mode <= 8; ++mode) {
         graph = new_graph();
         sink_mode = mode;
         sink_emitted = 0;
-        int expected = mode == 1 || mode == 7 ? 0 : -2;
+        int expected = mode == 1 || mode >= 7 ? 0 : -2;
         CHECK(rptadv_ffmpeg_bridge_process_block(graph, input, 8, output) == expected);
         rptadv_ffmpeg_bridge_destroy(graph);
     }
