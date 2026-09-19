@@ -13,7 +13,7 @@ PYTHON ?= python3
 
 PACKAGE := rptadv-ffmpeg-adapter
 CRATE := rptadv_ffmpeg_adapter
-PACKAGE_VERSION ?= 0.1.0-alpha.1
+PACKAGE_VERSION ?= 0.1.0-alpha.2
 SOVERSION := 1
 PREFIX ?= /usr/local
 DESTDIR ?=
