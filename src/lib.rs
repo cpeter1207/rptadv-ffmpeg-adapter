@@ -49,6 +49,30 @@ pub struct Graph {
     maximum_frame_count: u32,
 }
 
+/// Sized actual bridge state, deliberately separate from source-time/age bounds.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferingState {
+    /// Readable/writable complete prefix size, at least 48.
+    struct_size: u32,
+    /// Record ABI, one.
+    abi_version: u32,
+    /// Independent valid-count, last-block and audited-backend-model bits.
+    flags: u32,
+    /// Must be zero.
+    reserved: u32,
+    /// Accepted input, including warmup.
+    accepted_frames: u64,
+    /// Graph output returned, excluding bridge padding.
+    delivered_frames: u64,
+    /// Current delayed-output FIFO occupancy.
+    output_fifo_frames: u64,
+    /// Last successful block's bridge-generated prefix zeros.
+    zero_prefix_frames: u32,
+    /// Last successful block's bridge-generated suffix zeros.
+    zero_suffix_frames: u32,
+}
+
 impl Drop for Graph {
     /// Release the C-owned FFmpeg graph when the public handle is destroyed.
     fn drop(&mut self) {
@@ -68,6 +92,7 @@ pub struct AdapterDescriptor {
     process: extern "C" fn(*mut Graph, *const f32, u32, *mut f32, u32, *mut u32, *mut u32) -> c_int,
     destroy: extern "C" fn(*mut Graph),
     process_block: extern "C" fn(*mut Graph, *const f32, u32, *mut f32) -> c_int,
+    buffering_state: extern "C" fn(*const Graph, *mut BufferingState) -> c_int,
 }
 
 // The descriptor contains only immutable pointers to static code and storage.
@@ -217,6 +242,51 @@ extern "C" fn process_block(
     }
 }
 
+/// Read one owner-serialized exact-block observation without consuming input.
+/// Invalid records and unsupported streaming use leave caller output untouched.
+extern "C" fn buffering_state(graph: *const Graph, output: *mut BufferingState) -> c_int {
+    let (Some(graph), Some(output)) = (NonNull::new(graph.cast_mut()), NonNull::new(output)) else {
+        return INVALID_ARGUMENT;
+    };
+    if (output.as_ptr() as usize) % std::mem::align_of::<BufferingState>() != 0 {
+        return INVALID_ARGUMENT;
+    }
+    // SAFETY: the public caller advertises a readable header. Do not form a
+    // complete record reference before verifying its declared size.
+    unsafe {
+        if ptr::addr_of!((*output.as_ptr()).struct_size).read() < size_of::<BufferingState>() as u32
+            || ptr::addr_of!((*output.as_ptr()).abi_version).read() != ABI_VERSION
+            || ptr::addr_of!((*output.as_ptr()).reserved).read() != 0
+        {
+            return INVALID_ARGUMENT;
+        }
+    }
+    let mut state = BufferingState {
+        struct_size: size_of::<BufferingState>() as u32,
+        abi_version: ABI_VERSION,
+        flags: 0,
+        reserved: 0,
+        accepted_frames: 0,
+        delivered_frames: 0,
+        output_fifo_frames: 0,
+        zero_prefix_frames: 0,
+        zero_suffix_frames: 0,
+    };
+    // SAFETY: the unique graph owner serializes every operation and the private
+    // bridge receives a complete stack result, not the caller's optional tail.
+    let result = unsafe {
+        bridge::rptadv_ffmpeg_bridge_buffering_state(
+            graph.as_ref().bridge_graph.as_ptr(),
+            &mut state,
+        )
+    };
+    if result == bridge::OK {
+        // SAFETY: the complete aligned prefix was checked; larger tails stay intact.
+        unsafe { output.as_ptr().write(state) };
+    }
+    result
+}
+
 /// Destroy one graph after all callers have stopped using it.
 extern "C" fn destroy(graph: *mut Graph) {
     let Some(graph) = NonNull::new(graph) else {
@@ -236,6 +306,7 @@ static DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     process,
     destroy,
     process_block,
+    buffering_state,
 };
 
 /// Return the immutable function table for ABI version one.

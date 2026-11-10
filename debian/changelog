@@ -1,3 +1,12 @@
+rptadv-ffmpeg-adapter (0.1.0~alpha3-1) unstable; urgency=medium
+
+  * Expose optional exact-block input, output, FIFO and padding observations.
+  * Keep audited backend identification separate from recipe and source-age bounds.
+  * Invalidate accounting after backend faults or counter overflow.
+  * Link dynamically to libswresample for the audited backend version query.
+
+ -- Chris Peterson <cpeter1207@users.noreply.github.com>  Tue, 10 Nov 2026 00:20:02 +0000
+
 rptadv-ffmpeg-adapter (0.1.0~alpha2-1) unstable; urgency=medium
 
   * Release 0.1.0-alpha.2.

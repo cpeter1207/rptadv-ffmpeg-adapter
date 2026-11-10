@@ -17,12 +17,37 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavutil/audio_fifo.h>
+#include <libavutil/avutil.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
+#include <libavutil/version.h>
+#include <libswresample/swresample.h>
+
+/** @brief Fixed representation shared with the public sized Rust record. */
+struct rptadv_ffmpeg_bridge_buffering_state {
+	/** Complete public prefix size. */
+	uint32_t struct_size;
+	/** Record contract, one. */
+	uint32_t abi_version;
+	/** Independent accounting, last-block and audited-model bits. */
+	uint32_t flags;
+	/** Reserved zero field. */
+	uint32_t reserved;
+	/** Input frames accepted, including warmup. */
+	uint64_t accepted_frames;
+	/** Graph frames returned, excluding padding. */
+	uint64_t delivered_frames;
+	/** Current bridge FIFO occupancy. */
+	uint64_t output_fifo_frames;
+	/** Last successful block's bridge prefix padding. */
+	uint32_t zero_prefix_frames;
+	/** Last successful block's bridge suffix padding. */
+	uint32_t zero_suffix_frames;
+};
 
 /** Number of source frames reserved for exact-block graph processing. */
 #define RPTADV_FFMPEG_BLOCK_INPUT_FRAME_COUNT 8U
@@ -61,7 +86,56 @@ struct rptadv_ffmpeg_bridge_graph {
 	enum rptadv_ffmpeg_bridge_processing_contract processing_contract;
 	/** @brief Nonzero after the exact-block graph has emitted real output. */
 	int block_output_started;
+	/** @brief Accepted input frames, without wrapping on overflow. */
+	uint64_t accepted_frames;
+	/** @brief Returned graph frames, excluding bridge-generated padding. */
+	uint64_t delivered_frames;
+	/** @brief Prefix padding in the last successful block. */
+	uint32_t zero_prefix_frames;
+	/** @brief Suffix padding in the last successful block. */
+	uint32_t zero_suffix_frames;
+	/** @brief Cleared permanently after a backend fault or counter overflow. */
+	int accounting_valid;
+	/** @brief A successful exact-block padding record is present. */
+	int last_block_valid;
+	/** @brief Cached separately audited backend model, never graph qualification. */
+	uint32_t model_flags;
 };
+
+/**
+ * @brief Identify the audited FFmpeg 7.1 filter/phase implementation family.
+ * @param filter_version Actual linked libavfilter version.
+ * @param resample_version Actual linked libswresample version.
+ * @param version Linked FFmpeg release string; only the audited 7.1.1–7.1.5 range.
+ * @return Model-v1 bit, or zero without rejecting ordinary graph processing.
+ */
+static uint32_t audited_buffering_model(unsigned int filter_version,
+				       unsigned int resample_version,
+				       const char *version)
+{
+	if (version == NULL || strncmp(version, "7.1.", 4) != 0 ||
+	    version[4] < '1' || version[4] > '5' ||
+	    (version[5] != '\0' && version[5] != '-'))
+		return 0;
+	return (filter_version == AV_VERSION_INT(10, 4, 100) ||
+		filter_version == AV_VERSION_INT(10, 5, 100)) &&
+		resample_version == AV_VERSION_INT(5, 3, 100) ? 4U : 0U;
+}
+
+/**
+ * @brief Advance accounting without ever wrapping into a fresh-looking epoch.
+ * @param graph Graph whose accounting is invalidated on overflow.
+ * @param counter Accepted or delivered counter to advance.
+ * @param frames Successfully transferred frame count.
+ */
+static void account_frames(struct rptadv_ffmpeg_bridge_graph *graph,
+			   uint64_t *counter, uint64_t frames)
+{
+	if (UINT64_MAX - *counter < frames)
+		graph->accounting_valid = 0;
+	else
+		*counter += frames;
+}
 
 void rptadv_ffmpeg_bridge_destroy(struct rptadv_ffmpeg_bridge_graph *graph)
 {
@@ -260,6 +334,9 @@ int rptadv_ffmpeg_bridge_create(uint32_t sample_rate_hz,
 		return RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR;
 	}
 	graph->maximum_frame_count = maximum_frame_count;
+	graph->accounting_valid = 1;
+	graph->model_flags = audited_buffering_model(avfilter_version(), swresample_version(),
+						   av_version_info());
 	result = configure_streaming_buffers(graph, sample_rate_hz);
 	if (result >= 0) {
 		result = configure_filter_graph(graph, sample_rate_hz, filter_description);
@@ -393,6 +470,8 @@ static int read_block_output(struct rptadv_ffmpeg_bridge_graph *graph, float *ou
 	uint32_t fill = frame_count - copied;
 	void *planes[1];
 	int read;
+	graph->zero_prefix_frames = graph->block_output_started ? 0 : fill;
+	graph->zero_suffix_frames = graph->block_output_started ? fill : 0;
 
 	if (!graph->block_output_started) {
 		memset(output, 0, (size_t)fill * sizeof(*output));
@@ -402,6 +481,7 @@ static int read_block_output(struct rptadv_ffmpeg_bridge_graph *graph, float *ou
 		read = av_audio_fifo_read(graph->block_output_fifo, planes, (int)copied);
 		if (read != (int)copied)
 			return AVERROR(EIO);
+		account_frames(graph, &graph->delivered_frames, copied);
 		graph->block_output_started = 1;
 		return 0;
 	}
@@ -410,6 +490,7 @@ static int read_block_output(struct rptadv_ffmpeg_bridge_graph *graph, float *ou
 		read = av_audio_fifo_read(graph->block_output_fifo, planes, (int)copied);
 		if (read != (int)copied)
 			return AVERROR(EIO);
+		account_frames(graph, &graph->delivered_frames, copied);
 	}
 	memset(output + copied, 0, (size_t)fill * sizeof(*output));
 	return 0;
@@ -470,19 +551,53 @@ int rptadv_ffmpeg_bridge_process_block(struct rptadv_ffmpeg_bridge_graph *graph,
 		return RPTADV_FFMPEG_BRIDGE_INVALID_ARGUMENT;
 	}
 	graph->processing_contract = RPTADV_FFMPEG_BRIDGE_PROCESSING_BLOCK;
+	graph->last_block_valid = 0;
 	frame = next_block_input_frame(graph);
-	if (frame == NULL)
+	if (frame == NULL) {
+		graph->accounting_valid = 0;
 		return RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR;
+	}
 	frame->nb_samples = (int)frame_count;
 	frame->pts = AV_NOPTS_VALUE;
 	memcpy(frame->data[0], input, (size_t)frame_count * sizeof(*input));
 	result = av_buffersrc_add_frame_flags(graph->source, frame,
 					 AV_BUFFERSRC_FLAG_KEEP_REF | AV_BUFFERSRC_FLAG_PUSH);
-	if (result < 0)
+	if (result < 0) {
+		graph->accounting_valid = 0;
 		return RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR;
+	}
+	account_frames(graph, &graph->accepted_frames, frame_count);
 	result = drain_block_output(graph);
-	if (result < 0)
+	if (result < 0) {
+		graph->accounting_valid = 0;
 		return RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR;
+	}
 	result = read_block_output(graph, output, frame_count);
-	return result < 0 ? RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR : RPTADV_FFMPEG_BRIDGE_OK;
+	if (result < 0) {
+		graph->accounting_valid = 0;
+		return RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR;
+	}
+	graph->last_block_valid = 1;
+	return RPTADV_FFMPEG_BRIDGE_OK;
+}
+
+int rptadv_ffmpeg_bridge_buffering_state(
+	const struct rptadv_ffmpeg_bridge_graph *graph,
+	struct rptadv_ffmpeg_bridge_buffering_state *output)
+{
+	if (graph == NULL || output == NULL)
+		return RPTADV_FFMPEG_BRIDGE_INVALID_ARGUMENT;
+	if (graph->processing_contract == RPTADV_FFMPEG_BRIDGE_PROCESSING_STREAMING)
+		return RPTADV_FFMPEG_BRIDGE_UNSUPPORTED;
+	output->struct_size = sizeof(*output);
+	output->abi_version = 1;
+	output->reserved = 0;
+	output->flags = graph->model_flags | (graph->accounting_valid ? 1U : 0U) |
+		(graph->last_block_valid ? 2U : 0U);
+	output->accepted_frames = graph->accepted_frames;
+	output->delivered_frames = graph->delivered_frames;
+	output->output_fifo_frames = (uint64_t)av_audio_fifo_size(graph->block_output_fifo);
+	output->zero_prefix_frames = graph->zero_prefix_frames;
+	output->zero_suffix_frames = graph->zero_suffix_frames;
+	return RPTADV_FFMPEG_BRIDGE_OK;
 }

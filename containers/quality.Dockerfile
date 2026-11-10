@@ -14,7 +14,7 @@ ENV CARGO_HOME=/opt/cargo
 ENV PATH=/opt/cargo/bin:${PATH}
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-		ca-certificates cargo curl debhelper dpkg-dev libavfilter-dev libavutil-dev pkg-config rustc && \
+		ca-certificates cargo curl debhelper dpkg-dev libavfilter-dev libavutil-dev libswresample-dev pkg-config rustc && \
 	rm -rf /var/lib/apt/lists/*
 
 # Pin the compiler used to build the public ABI rather than inheriting a

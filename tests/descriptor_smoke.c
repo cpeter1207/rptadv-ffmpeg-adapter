@@ -19,6 +19,91 @@ static int approximately_equal(float left, float right)
 	return fabsf(left - right) < 0.0001F;
 }
 
+/** @brief Exact-block users can optionally inspect buffering without consuming PCM. */
+static void test_buffering_capability(const struct rptadv_ffmpeg_adapter_descriptor *descriptor)
+{
+	assert(descriptor->struct_size >=
+	       RPTADV_FFMPEG_ADAPTER_DESCRIPTOR_V1_BUFFERING_MIN_SIZE);
+	assert(descriptor->buffering_state != NULL);
+	const struct rptadv_ffmpeg_graph_config config = {
+		.struct_size = sizeof(config),
+		.abi_version = 1,
+		.sample_rate_hz = 48000,
+		.maximum_frame_count = 8,
+		.filter_description = "asetnsamples=n=16:p=0",
+	};
+	struct rptadv_ffmpeg_graph *graph = NULL;
+	struct {
+		struct rptadv_ffmpeg_buffering_state_v1 state;
+		uint64_t tail;
+	} result = { .state = { .struct_size = sizeof(result), .abi_version = 1 },
+		     .tail = UINT64_C(0xfedcba9876543210) };
+	const float input[8] = { .1F, .2F, .3F, .4F, .5F, .6F, .7F, .8F };
+	float output[8];
+	assert(sizeof(result.state) == 48);
+	assert(descriptor->create(&config, &graph) == 0);
+	for (unsigned int block = 0; block < 4; ++block) {
+		if (block != 0)
+			assert(descriptor->process_block(graph, input, 8, output) == 0);
+		assert(descriptor->buffering_state(graph, &result.state) == 0);
+		assert(result.state.flags & RPTADV_FFMPEG_BUFFERING_COUNTS_VALID);
+		assert(result.state.flags & RPTADV_FFMPEG_BUFFERING_MODEL_V1);
+		assert(!!(result.state.flags & RPTADV_FFMPEG_BUFFERING_LAST_BLOCK_VALID) ==
+		       (block != 0));
+		assert(result.state.accepted_frames == block * 8);
+		assert(result.state.delivered_frames == (block == 0 ? 0 : (block - 1) * 8));
+		assert(result.state.output_fifo_frames == (block == 2 ? 8 : 0));
+		assert(result.state.zero_prefix_frames == (block == 1 ? 8 : 0));
+		assert(result.state.zero_suffix_frames == 0);
+		assert(result.tail == UINT64_C(0xfedcba9876543210));
+		struct rptadv_ffmpeg_buffering_state_v1 repeated = result.state;
+		assert(descriptor->buffering_state(graph, &repeated) == 0);
+		assert(memcmp(&repeated, &result.state, sizeof(repeated)) == 0);
+	}
+	assert(descriptor->buffering_state(NULL, &result.state) == -1);
+	assert(descriptor->buffering_state(graph, NULL) == -1);
+	_Alignas(struct rptadv_ffmpeg_buffering_state_v1) unsigned char unaligned[49];
+	memset(unaligned, 0x5a, sizeof(unaligned));
+	assert(descriptor->buffering_state(
+		       graph, (struct rptadv_ffmpeg_buffering_state_v1 *)(void *)(unaligned + 1)) ==
+	       -1);
+	for (unsigned int index = 0; index < sizeof(unaligned); ++index)
+		assert(unaligned[index] == 0x5a);
+	for (unsigned int invalid = 0; invalid < 3; ++invalid) {
+		struct rptadv_ffmpeg_buffering_state_v1 value = result.state;
+		if (invalid == 0)
+			value.struct_size = 47;
+		else if (invalid == 1)
+			value.abi_version = 2;
+		else
+			value.reserved = 1;
+		struct rptadv_ffmpeg_buffering_state_v1 before = value;
+		assert(descriptor->buffering_state(graph, &value) == -1);
+		assert(memcmp(&value, &before, sizeof(value)) == 0);
+	}
+	descriptor->destroy(graph);
+	struct rptadv_ffmpeg_graph_config dropping = config;
+	dropping.filter_description = "aselect=not(n)";
+	assert(descriptor->create(&dropping, &graph) == 0);
+	assert(descriptor->process_block(graph, input, 8, output) == 0);
+	assert(descriptor->process_block(graph, input, 8, output) == 0);
+	assert(descriptor->buffering_state(graph, &result.state) == 0);
+	assert(result.state.accepted_frames == 16);
+	assert(result.state.delivered_frames == 8);
+	assert(result.state.zero_prefix_frames == 0);
+	assert(result.state.zero_suffix_frames == 8);
+	for (unsigned int index = 0; index < 8; ++index)
+		assert(output[index] == 0.0F);
+	descriptor->destroy(graph);
+	assert(descriptor->create(&config, &graph) == 0);
+	uint32_t used, generated;
+	assert(descriptor->process(graph, input, 8, output, 8, &used, &generated) == 0);
+	struct rptadv_ffmpeg_buffering_state_v1 before = result.state;
+	assert(descriptor->buffering_state(graph, &result.state) == -3);
+	assert(memcmp(&before, &result.state, sizeof(before)) == 0);
+	descriptor->destroy(graph);
+}
+
 /** @brief Verify exact-block playout preserves samples buffered by FFmpeg. */
 static void test_process_block_fifo(const struct rptadv_ffmpeg_adapter_descriptor *descriptor)
 {
@@ -159,5 +244,6 @@ int main(void)
 	test_process_block_fifo(descriptor);
 	test_process_block_stateful_filter(descriptor);
 	test_process_block_normalizes_filter_output(descriptor);
+	test_buffering_capability(descriptor);
 	return 0;
 }

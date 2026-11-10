@@ -2,7 +2,7 @@ Source: rptadv-ffmpeg-adapter
 Section: libs
 Priority: optional
 Maintainer: Chris Peterson <cpeter1207@users.noreply.github.com>
-Build-Depends: cargo, debhelper-compat (= 13), libavfilter-dev, libavutil-dev, pkg-config, rustc
+Build-Depends: cargo, debhelper-compat (= 13), libavfilter-dev, libavutil-dev, libswresample-dev, pkg-config, rustc
 Standards-Version: 4.7.2
 Homepage: https://github.com/cpeter1207/rptadv-ffmpeg-adapter
 Rules-Requires-Root: no
