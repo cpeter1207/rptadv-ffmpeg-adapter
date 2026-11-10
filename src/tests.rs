@@ -109,6 +109,75 @@ impl Drop for TestGraph {
 }
 
 #[test]
+fn buffering_query_preserves_invalid_outputs_and_does_not_consume_pcm() {
+    let graph = TestGraph::new(c"asetnsamples=n=16:p=0");
+    let mut state = super::BufferingState {
+        struct_size: size_of::<super::BufferingState>() as u32,
+        abi_version: 1,
+        flags: 0,
+        reserved: 0,
+        accepted_frames: 99,
+        delivered_frames: 99,
+        output_fifo_frames: 99,
+        zero_prefix_frames: 99,
+        zero_suffix_frames: 99,
+    };
+    let before = state;
+    assert_eq!(super::buffering_state(ptr::null(), &mut state), -1);
+    assert_eq!(state, before);
+    assert_eq!(super::buffering_state(graph.0, ptr::null_mut()), -1);
+    for field in 0..3 {
+        let mut invalid = state;
+        match field {
+            0 => invalid.struct_size -= 1,
+            1 => invalid.abi_version += 1,
+            _ => invalid.reserved = 1,
+        }
+        let before = invalid;
+        assert_eq!(super::buffering_state(graph.0, &mut invalid), -1);
+        assert_eq!(invalid, before);
+    }
+    let mut unaligned = [u64::MAX; 7];
+    // SAFETY: the deliberately unaligned pointer is never dereferenced; rejection
+    // must precede all record reads and leave the complete backing storage intact.
+    let output = unsafe { unaligned.as_mut_ptr().cast::<u8>().add(1).cast() };
+    assert_eq!(super::buffering_state(graph.0, output), -1);
+    assert_eq!(unaligned, [u64::MAX; 7]);
+    assert_eq!(super::buffering_state(graph.0, &mut state), 0);
+    assert_eq!(state.accepted_frames, 0);
+    assert_eq!(state.flags & 3, 1);
+    let input = [0.25; 8];
+    let mut output = [0.0; 8];
+    for block in 1..=2 {
+        assert_eq!(
+            super::process_block(graph.0, input.as_ptr(), 8, output.as_mut_ptr()),
+            0
+        );
+        assert_eq!(super::buffering_state(graph.0, &mut state), 0);
+        assert_eq!(state.accepted_frames, block * 8);
+        assert_eq!(state.delivered_frames, (block - 1) * 8);
+        assert_eq!(state.output_fifo_frames, (block - 1) * 8);
+    }
+    let streamed = TestGraph::new(c"anull");
+    let (mut used, mut generated) = (0, 0);
+    assert_eq!(
+        super::process(
+            streamed.0,
+            input.as_ptr(),
+            8,
+            output.as_mut_ptr(),
+            8,
+            &mut used,
+            &mut generated,
+        ),
+        0
+    );
+    let before = state;
+    assert_eq!(super::buffering_state(streamed.0, &mut state), -3);
+    assert_eq!(state, before);
+}
+
+#[test]
 fn graph_creation_propagates_configuration_and_filter_failures() {
     let mut config = valid_config();
     let mut graph = ptr::null_mut();

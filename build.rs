@@ -18,12 +18,12 @@ fn run(command: &mut Command, description: &str) {
 /// Query space-separated compiler flags from pkg-config for FFmpeg headers.
 fn pkg_config_cflags() -> Vec<String> {
     let output = Command::new("pkg-config")
-        .args(["--cflags", "libavfilter", "libavutil"])
+        .args(["--cflags", "libavfilter", "libavutil", "libswresample"])
         .output()
-        .expect("cannot start pkg-config for libavfilter/libavutil");
+        .expect("cannot start pkg-config for FFmpeg/SWR development files");
     assert!(
         output.status.success(),
-        "pkg-config could not locate development files for libavfilter/libavutil"
+        "pkg-config could not locate FFmpeg/SWR development files"
     );
     String::from_utf8(output.stdout)
         .expect("pkg-config emitted non-UTF-8 compiler flags")
@@ -64,6 +64,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=rptadv_ffmpeg_bridge");
     println!("cargo:rustc-link-lib=dylib=avfilter");
     println!("cargo:rustc-link-lib=dylib=avutil");
+    println!("cargo:rustc-link-lib=dylib=swresample");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/ffmpeg_bridge.c");
     println!("cargo:rerun-if-changed=src/ffmpeg_bridge.h");

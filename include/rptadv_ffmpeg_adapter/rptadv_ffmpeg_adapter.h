@@ -25,6 +25,50 @@ extern "C" {
 /** @brief Opaque persistent FFmpeg graph state. */
 struct rptadv_ffmpeg_graph;
 
+/** @brief Exact-block counters have not faulted or overflowed. */
+#define RPTADV_FFMPEG_BUFFERING_COUNTS_VALID 1U
+/** @brief Padding describes the last successful exact-block operation. */
+#define RPTADV_FFMPEG_BUFFERING_LAST_BLOCK_VALID 2U
+/**
+ * @brief Linked backend supports the separately audited recipe model v1.
+ *
+ * This identifies audited FFmpeg 7.1.1–7.1.5 releases using libavfilter
+ * 10.4/10.5.100 with libswresample 5.3.100;
+ * it does not qualify arbitrary graph descriptions or provide an age bound.
+ */
+#define RPTADV_FFMPEG_BUFFERING_MODEL_V1 4U
+
+/**
+ * @brief Actual bridge accounting, never a source position or inferred age.
+ *
+ * Accepted input includes preparation warmup. Delivered graph output excludes
+ * bridge-added padding, but may itself contain filter-produced silence.
+ * Only a separately audited sample-preserving recipe can interpret the counter
+ * difference as programme backlog; filter lookahead must also be accounted for.
+ * Fault/overflow invalidation remains latched until quiescent destruction and
+ * fresh graph creation. No universal in-place history reset is provided.
+ */
+struct rptadv_ffmpeg_buffering_state_v1 {
+	/** Readable/writable prefix size, at least 48 bytes. */
+	uint32_t struct_size;
+	/** Record contract, one. */
+	uint32_t abi_version;
+	/** Independent RPTADV_FFMPEG_BUFFERING_* validity/model bits. */
+	uint32_t flags;
+	/** Must be zero. */
+	uint32_t reserved;
+	/** Cumulative input frames accepted by the graph. */
+	uint64_t accepted_frames;
+	/** Cumulative graph frames copied to callers, excluding bridge padding. */
+	uint64_t delivered_frames;
+	/** Actual current delayed-output FIFO occupancy. */
+	uint64_t output_fifo_frames;
+	/** Bridge-generated leading zeros in the last successful block. */
+	uint32_t zero_prefix_frames;
+	/** Bridge-generated trailing zeros in the last successful block. */
+	uint32_t zero_suffix_frames;
+};
+
 /** @brief Result returned by an adapter operation. */
 enum rptadv_ffmpeg_adapter_result {
 	/** Operation completed. */
@@ -142,6 +186,22 @@ struct rptadv_ffmpeg_adapter_descriptor {
 	enum rptadv_ffmpeg_adapter_result (*process_block)(
 		struct rptadv_ffmpeg_graph *graph, const float *input,
 		uint32_t frame_count, float *output);
+	/**
+	 * @brief Read exact-block accounting without consuming PCM or allocating.
+	 *
+	 * The graph's sole owner serializes this query with processing/destruction.
+	 * Initialize output size/version/reserved. Invalid arguments and unsupported
+	 * streaming graphs leave output and graph state untouched. Larger output
+	 * tails are accepted and untouched. Before processing, counters are zero and
+	 * LAST_BLOCK_VALID is clear. Optional capability; ordinary processing does
+	 * not require it. Backend model support is independent of ordinary processing.
+	 * @param graph Live graph with no concurrently executing operation.
+	 * @param output Complete sized output record retained through the call.
+	 * @return One adapter result; success may still report invalidated counters.
+	 */
+	enum rptadv_ffmpeg_adapter_result (*buffering_state)(
+		const struct rptadv_ffmpeg_graph *graph,
+		struct rptadv_ffmpeg_buffering_state_v1 *output);
 };
 
 /** @brief Minimum readable size of an ABI-v1 adapter descriptor. */
@@ -159,6 +219,11 @@ struct rptadv_ffmpeg_adapter_descriptor {
 #define RPTADV_FFMPEG_ADAPTER_DESCRIPTOR_V1_PROCESS_BLOCK_MIN_SIZE \
 	(offsetof(struct rptadv_ffmpeg_adapter_descriptor, process_block) + \
 	 sizeof(((struct rptadv_ffmpeg_adapter_descriptor *)0)->process_block))
+
+/** @brief Complete optional exact-block accounting capability. */
+#define RPTADV_FFMPEG_ADAPTER_DESCRIPTOR_V1_BUFFERING_MIN_SIZE \
+	(offsetof(struct rptadv_ffmpeg_adapter_descriptor, buffering_state) + \
+	 sizeof(((struct rptadv_ffmpeg_adapter_descriptor *)0)->buffering_state))
 
 #if defined(__cplusplus)
 static_assert(sizeof(enum rptadv_ffmpeg_adapter_result) == sizeof(int),

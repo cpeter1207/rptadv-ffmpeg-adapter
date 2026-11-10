@@ -116,8 +116,8 @@ coverage:
 		RUSTUP_TOOLCHAIN=$(COVERAGE_TOOLCHAIN) CARGO_LLVM_COV_TARGET_DIR=$(abspath $(COVERAGE_TARGET_DIR)) \
 		$(CARGO_LLVM_COV) --all-targets --locked --branch --json --output-path $(COVERAGE_JSON)
 	$(CC) -std=c11 -Wall -Wextra -Werror --coverage \
-		$$(pkg-config --cflags libavfilter libavutil) tests/bridge_faults.c \
-		$$(pkg-config --libs libavfilter libavutil) -o $(COVERAGE_DIR)/bridge-faults
+		$$(pkg-config --cflags libavfilter libavutil libswresample) tests/bridge_faults.c \
+		$$(pkg-config --libs libavfilter libavutil libswresample) -o $(COVERAGE_DIR)/bridge-faults
 	./$(COVERAGE_DIR)/bridge-faults
 	gcovr --root . --filter 'src/ffmpeg_bridge.c' --json-summary $(COVERAGE_DIR)/c-summary.json \
 		--fail-under-line 100 --fail-under-branch 100 $(COVERAGE_TARGET_DIR) $(COVERAGE_DIR)
@@ -136,8 +136,8 @@ $(C_SMOKE_BINARY): $(C_SMOKE_SOURCE) $(HEADER) $(LIBRARY_LINK) | build
 
 $(C_FAULT_BINARY): $(C_FAULT_SOURCE) $(C_BRIDGE_SOURCES) | build
 	$(CC) -std=c11 -Wall -Wextra -Werror \
-		$$(pkg-config --cflags libavfilter libavutil) $< \
-		$$(pkg-config --libs libavfilter libavutil) -o $@
+		$$(pkg-config --cflags libavfilter libavutil libswresample) $< \
+		$$(pkg-config --libs libavfilter libavutil libswresample) -o $@
 
 install: all $(PC_FILE)
 	install -d $(DESTDIR)$(LIBDIR) \
@@ -160,6 +160,7 @@ install-check: all
 		grep -F '$(LIBRARY_BASENAME).so.$(SOVERSION)'
 	$(READELF) -d build/stage/usr/lib/$(notdir $(LIBRARY_VERSIONED)) | grep -F 'libavfilter.so'
 	$(READELF) -d build/stage/usr/lib/$(notdir $(LIBRARY_VERSIONED)) | grep -F 'libavutil.so'
+	$(READELF) -d build/stage/usr/lib/$(notdir $(LIBRARY_VERSIONED)) | grep -F 'libswresample.so'
 	test -f build/stage/usr/include/rptadv_ffmpeg_adapter/$(notdir $(HEADER))
 	test -f build/stage/usr/lib/pkgconfig/rptadv_ffmpeg_adapter.pc
 	$(CC) -std=c11 -Wall -Wextra -Werror $(C_SMOKE_SOURCE) \
@@ -192,6 +193,7 @@ debian-package-check: dist
 	test -L "$(DEBIAN_STAGE)/usr/lib/$(DEBIAN_MULTIARCH)/$(LIBRARY_BASENAME).so"
 	$(READELF) -d "$(DEBIAN_STAGE)/usr/lib/$(DEBIAN_MULTIARCH)/$(LIBRARY_BASENAME).so.$(SOVERSION)" | grep -F '$(LIBRARY_BASENAME).so.$(SOVERSION)'
 	$(READELF) -d "$(DEBIAN_STAGE)/usr/lib/$(DEBIAN_MULTIARCH)/$(LIBRARY_BASENAME).so.$(SOVERSION)" | grep -F 'libavfilter.so'
+	$(READELF) -d "$(DEBIAN_STAGE)/usr/lib/$(DEBIAN_MULTIARCH)/$(LIBRARY_BASENAME).so.$(SOVERSION)" | grep -F 'libswresample.so'
 	! $(READELF) -d "$(DEBIAN_STAGE)/usr/lib/$(DEBIAN_MULTIARCH)/$(LIBRARY_BASENAME).so.$(SOVERSION)" | grep -E 'res_usbradio.so|libportaudio.so|libasound.so|libhamlib.so'
 
 dist: | build

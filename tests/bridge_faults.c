@@ -241,10 +241,55 @@ static void block_failures(void)
     rptadv_ffmpeg_bridge_destroy(graph);
 }
 
+static void buffering_failures(void)
+{
+    struct rptadv_ffmpeg_bridge_buffering_state state = {0};
+    struct rptadv_ffmpeg_bridge_graph *graph = new_graph();
+    const float input[8] = {0};
+    float output[8];
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, &state) == 0);
+    CHECK((state.flags & 3) == 1);
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(NULL, &state) == -1);
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, NULL) == -1);
+    CHECK(audited_buffering_model(AV_VERSION_INT(10, 4, 100), AV_VERSION_INT(5, 3, 100), "7.1.1") == 4);
+    CHECK(audited_buffering_model(AV_VERSION_INT(10, 5, 100), AV_VERSION_INT(5, 3, 100), "7.1.5-0+deb13u1") == 4);
+    CHECK(audited_buffering_model(AV_VERSION_INT(10, 6, 100), AV_VERSION_INT(5, 3, 100), "7.1.5") == 0);
+    CHECK(audited_buffering_model(AV_VERSION_INT(10, 5, 100), AV_VERSION_INT(5, 4, 100), "7.1.5") == 0);
+    const char *unsupported[] = {NULL, "", "7.1.", "7.1.0", "7.1.6", "7.1.10", "7.1.5x"};
+    for (size_t index = 0; index < sizeof(unsupported) / sizeof(*unsupported); ++index)
+        CHECK(audited_buffering_model(AV_VERSION_INT(10, 5, 100), AV_VERSION_INT(5, 3, 100), unsupported[index]) == 0);
+    graph->model_flags = 0;
+    CHECK(rptadv_ffmpeg_bridge_process_block(graph, input, 8, output) == 0);
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, &state) == 0);
+    CHECK((state.flags & 7) == 3);
+    select_fault(SOURCE_ADD, 1);
+    CHECK(rptadv_ffmpeg_bridge_process_block(graph, input, 8, output) == -2);
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, &state) == 0);
+    CHECK((state.flags & 3) == 0);
+    rptadv_ffmpeg_bridge_destroy(graph);
+    for (int counter = 0; counter < 2; ++counter) {
+        graph = new_graph();
+        if (counter == 0)
+            graph->accepted_frames = UINT64_MAX - 3;
+        else
+            graph->delivered_frames = UINT64_MAX - 3;
+        CHECK(rptadv_ffmpeg_bridge_process_block(graph, input, 8, output) == 0);
+        CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, &state) == 0);
+        CHECK((state.flags & 1) == 0);
+        rptadv_ffmpeg_bridge_destroy(graph);
+    }
+    graph = new_graph();
+    uint32_t used, generated;
+    CHECK(rptadv_ffmpeg_bridge_process(graph, input, 8, output, 8, &used, &generated) == 0);
+    CHECK(rptadv_ffmpeg_bridge_buffering_state(graph, &state) == -3);
+    rptadv_ffmpeg_bridge_destroy(graph);
+}
+
 int main(void)
 {
     creation_failures();
     streaming_failures();
     block_failures();
+    buffering_failures();
     return 0;
 }

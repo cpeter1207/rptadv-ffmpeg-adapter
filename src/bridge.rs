@@ -3,6 +3,7 @@
 //! FFmpeg headers and types remain contained in the C bridge, so no FFmpeg
 //! layout or callback ABI leaks into the stable public Rust/C descriptor.
 
+use crate::BufferingState;
 use std::ffi::{c_char, c_int};
 
 /// Opaque C bridge graph state.
@@ -40,6 +41,11 @@ unsafe extern "C" {
         input: *const f32,
         frame_count: u32,
         output: *mut f32,
+    ) -> c_int;
+    /// Read actual counters into a complete caller-owned stack record.
+    pub(crate) fn rptadv_ffmpeg_bridge_buffering_state(
+        graph: *const BridgeGraph,
+        output: *mut BufferingState,
     ) -> c_int;
     /// Release one C-owned FFmpeg graph.
     pub(crate) fn rptadv_ffmpeg_bridge_destroy(graph: *mut BridgeGraph);

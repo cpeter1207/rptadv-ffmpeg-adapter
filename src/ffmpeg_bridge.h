@@ -17,6 +17,11 @@ struct rptadv_ffmpeg_bridge_graph;
 #define RPTADV_FFMPEG_BRIDGE_INVALID_ARGUMENT -1
 /** @brief FFmpeg failed a private bridge operation. */
 #define RPTADV_FFMPEG_BRIDGE_FFMPEG_ERROR -2
+/** @brief The graph selected the incompatible streaming contract. */
+#define RPTADV_FFMPEG_BRIDGE_UNSUPPORTED -3
+
+/** @brief Complete private result; the bridge fills every field on success. */
+struct rptadv_ffmpeg_bridge_buffering_state;
 
 /**
  * @brief Create one FFmpeg graph with implicit mono F32 source and sink.
@@ -68,6 +73,16 @@ int rptadv_ffmpeg_bridge_process(struct rptadv_ffmpeg_bridge_graph *graph,
 int rptadv_ffmpeg_bridge_process_block(struct rptadv_ffmpeg_bridge_graph *graph,
 				       const float *input, uint32_t frame_count,
 				       float *output);
+
+/**
+ * @brief Read owner-serialized exact-block counters without state mutation.
+ * @param graph Live graph, serialized against processing and destruction.
+ * @param output Complete private result, written only on success.
+ * @return One private result; streaming use is unsupported.
+ */
+int rptadv_ffmpeg_bridge_buffering_state(
+	const struct rptadv_ffmpeg_bridge_graph *graph,
+	struct rptadv_ffmpeg_bridge_buffering_state *output);
 
 /**
  * @brief Release a bridge graph.
